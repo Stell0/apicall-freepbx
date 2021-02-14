@@ -11,7 +11,7 @@ Install googletts and apicall modules on FreePBX >= 14. Google tts require a val
 
 ## Usage
 call api
-curl -k 'https://HOST/freepbx/apicall/index.php?tok=12341234&tocall=NUMBER_TO_CALL&message=MESSAGE_TO_PLAY_WITH_TTS'
+curl -k 'https://HOST/freepbx/apicall/index.php?tok=123412346346234332&tocall=NUMBER_TO_CALL&message=MESSAGE_TO_PLAY_WITH_TTS'
 
 other parameters:
 destination: FreePBX destination for the call. Default is app-blackhole,hangup,1
