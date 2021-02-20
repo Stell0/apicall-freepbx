@@ -19,10 +19,14 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+include '/etc/freepbx_db.conf';
+$sql = 'SELECT `val` FROM `kvstore_FreePBX_modules_Apicall` WHERE `key` = "token"';
+$sth = $db->prepare($sql);
+$sth->execute();
+$token = $sth->fetchAll()[0][0];
 
-/* TODO add authentication */
-if ($_REQUEST['tok'] != '123412346346234332') {
-	echo 'error';
+if (empty($_SERVER['HTTP_TOKEN']) || $_SERVER['HTTP_TOKEN'] !== $token) {
+	http_response_code(401);
 	exit(1);
 }
 
@@ -49,41 +53,42 @@ if ($handle = opendir(__DIR__. '/../..')) {
     }
     closedir($handle);
 }
-
-
-$tocall = $_REQUEST['tocall'];
-$message = $_REQUEST['message'];
-$language = !empty($_REQUEST['language']) ? $_REQUEST['language'] : 'it';
-$maxretries = !empty($_REQUEST['maxretries']) ? $_REQUEST['maxretires'] : 0;
-$retrytime = !empty($_REQUEST['retrytime']) ? $_REQUEST['retrytime'] : 60;
-$waittime = !empty($_REQUEST['waittime']) ? $_REQUEST['waittime'] : 30;
-$destination = !empty($_REQUEST['destination']) ? $_REQUEST['destination'] : 'app-blackhole,hangup,1';
+$post = json_decode(file_get_contents('php://input'), true);
+$tocall = $post['tocall'];
+$message = !empty($post['message']) ? $post['message'] : '';
+$language = !empty($post['language']) ? $post['language'] : 'it';
+$maxretries = !empty($post['maxretries']) ? $post['maxretires'] : 0;
+$retrytime = !empty($post['retrytime']) ? $post['retrytime'] : 60;
+$waittime = !empty($post['waittime']) ? $post['waittime'] : 30;
+$destination = !empty($post['destination']) ? $post['destination'] : 'app-blackhole,hangup,1';
+$callerid = !empty($post['callerid']) ? $post['callerid'] : '999';
 
 if (empty($tocall)) {
 	error_log('ApiCall: missing tocall');
+	http_response_code(400);
 	exit(1);
 }
 $content = "Channel: Local/{$tocall}@from-internal
 MaxRetries: {$maxretries}
 RetryTime: {$retrytime}
 WaitTime: {$waittime}
-Callerid: 999
+Callerid: {$callerid}
 Context: apicall
 Priority: 1
 Extension: s
 ";
 
-if (!empty($message)) {
+if (!empty($message) && function_exists('googletts_tts')) {
 	$filename = googletts_tts($message,$language);
     	$tmpfilepath = '/tmp/'.$filename.'.mp3';
-	#$dstfilepath = '/var/lib/asterisk/sounds/'.$language.'/'. $filename . '.wav';
 	$dstfilepath = '/var/lib/asterisk/sounds/' . $filename . '.wav';
     	$media = FreePBX::Media();
     	$media->load($tmpfilepath);
     	$media->convert($dstfilepath);
 	$content .= "Setvar: message=$filename\n";
-	$content .= "Setvar: destination=$destination\n";
 }
+
+$content .= "Setvar: destination=$destination\n";
 
 $tmp_name = tempnam("/tmp", 'apirecall');
 $f = fopen($tmp_name,"w");

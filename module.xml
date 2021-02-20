@@ -4,6 +4,9 @@
 	<name>API Call</name>
 	<version>0.0.1</version>
 	<category>Applications</category>
+	<menuitems>
+    		<apicall>API Calls</apicall>
+  	</menuitems>
 	<Publisher>Stefano Fancello</Publisher>
 	<description>Make call from API</description>
 	<changelog></changelog>
@@ -12,7 +15,6 @@
 	<licenselink>http://www.gnu.org/licenses/gpl-2.0.txt</licenselink>
 	<depends>
 		<version>14.0.0</version>
-                <module>googletts</module>
 	</depends>
 	<supported>14.0.0</supported>
 </module>

@@ -43,17 +43,35 @@ class Apicall extends \FreePBX_Helpers implements \BMO
 	// instance of this object.
 	public function install()
 	{
+		if(!$this->getConfig('token')) {
+			$this->setConfig('token',$token = bin2hex(openssl_random_pseudo_bytes(16)));
+		}
       		$this->generateLink();
 	}
 	public function uninstall()
 	{
+		$this->delConfig('token');
+    		$path = \FreePBX::Config()->get_conf_setting('AMPWEBROOT');
+		$location = $path. '/apicall';
+		unlink($location);
 	}
 
+	public function showPage()
+	{
+		$subhead = _('Make outbound and internal calls using REST APIs');
+		$settings = array('token' => $this->getConfig('token'));
+		$content = load_view(__DIR__.'/views/form.php', array('settings' => $settings));
+		show_view(__DIR__.'/views/default.php', array('subhead' => $subhead, 'content' => $content));
+	}
 	// The following two stubs are planned for implementation in FreePBX 15.
 	public function backup()
 	{
 	}
 	public function restore($backup)
+	{
+	}
+
+	public function doConfigPageInit($page)
 	{
 	}
 
