@@ -20,7 +20,7 @@ At the moment, those modules will give the missing signature error on FreePBX in
 
 ## Usage
 call api
-curl 'https://HOST/FREEPBX_WEB_ROOT/apicall/' -H 'token: TOKEN' -H 'Content-Type: application/json;charset=utf-8' --data '{"tocall": "200"}'
+curl 'https://HOST/FREEPBX_WEB_ROOT/apicall/index.php' -H 'token: TOKEN' -H 'Content-Type: application/json;charset=utf-8' --data '{"tocall": "200"}'
 
 TOKEN is generated at module installation and you can find it in FreePBX Api Call module page
 
