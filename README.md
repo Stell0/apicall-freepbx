@@ -5,6 +5,19 @@ This FreePBX module allows to originate calls from FreePBX using Rest API.
 ## Install
 Install googletts and apicall modules on FreePBX >= 14. Google tts require a valid google API key. Used only if message parameter is setted
 
+### On NethVoice
+- googletts is already insalled
+- to install apicall, just download release .tar.gz file in /usr/src/nethvoice/modules/apicall.tar.gz and launch nethserver-nethvoice14-update event
+```
+wget https://github.com/Stell0/apicall-freepbx/archive/refs/heads/main.tar.gz -O /usr/src/nethvoice/modules/apicall.tar.gz
+signal-event nethserver-nethvoice-14-update
+```
+
+### On vanilla FreePBX
+
+Use module admin interface to install [GoogleTTS module](https://github.com/nethesis/googletts) And this one.
+At the moment, those modules will give the missing signature error on FreePBX interface. I'm not going to fix this in a near future because I find it boring and useless since you can check code by yourself. 
+
 ## Usage
 call api
 curl 'https://HOST/FREEPBX_WEB_ROOT/apicall/' -H 'token: TOKEN' -H 'Content-Type: application/json;charset=utf-8' --data '{"tocall": "200"}'
