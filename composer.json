@@ -1,0 +1,6 @@
+{
+    "require": {
+        "google/cloud-speech": "^1.4",
+        "google/cloud-text-to-speech": "^1.3"
+    }
+}
