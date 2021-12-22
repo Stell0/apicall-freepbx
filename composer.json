@@ -1,5 +1,7 @@
 {
     "require": {
+	"php": ">=5.6",
+	"slim/slim": "3.*",
         "google/cloud-speech": "^1.4",
         "google/cloud-text-to-speech": "^1.3"
     }

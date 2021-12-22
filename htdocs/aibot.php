@@ -50,20 +50,21 @@ if (empty($tocall)) {
 $input_parameters = array(
         'ContactId' => null,
         'CampaignId' => null,
-        'MessageId' => null,
         'PhoneNumber' => null,
+	'Language' => null,
         'MessageUrl' => null,
         'MessageText' => null,
         'UserInputMethod' => false, // false | 'voice' | 'digits'
+	'EndOfSpeakSilenceLength' => null,
         'MessageExitDigit' => '', // ''|123456789*# stop playing message and exit if one of digits is pressed
         'NuberOfExpectedDigits' => 0,
         'EndDigit' => null,
         'UserAnswerSTT' => null,
         'CallStatusWebhookUrl' => null,
-        'CallStatusWebhookHeaders' => '',
+        'CallStatusWebhookHeader' => '',
         'GoToDestination' => null, // If setted, go to this destination instead of process next POST
         'NextMessageWebhookUrl' => null,
-        'NextMessageWebhookHeaders' => '',
+        'NextMessageWebhookHeader' => '',
 );
 
 $content = "Channel: Local/{$tocall}@from-internal

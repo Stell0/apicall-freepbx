@@ -2,7 +2,7 @@
 <?php
 
 #
-#	Copyright (C) 2018 Nethesis S.r.l.
+#	Copyright (C) 2021 Nethesis S.r.l.
 #	http://www.nethesis.it - support@nethesis.it
 #
 #	This file is part of ReturnOnTransfer FreePBX module.
@@ -48,17 +48,18 @@ $agi = new AGI();
 $input_parameters = array(
 	'ContactId' => null,
 	'CampaignId' => null,
-	'MessageId' => null,
 	'PhoneNumber' => null,
+	'Language' => null,
 	'MessageUrl' => null,
 	'MessageText' => null,
 	'UserInputMethod' => false, // false | 'voice' | 'digits'
+	'EndOfSpeakSilenceLength' => null,
 	'MessageExitDigit' => '', // ''|123456789*# stop playing message and exit if one of digits is pressed
 	'NuberOfExpectedDigits' => 0,
 	'EndDigit' => null,
 	'UserAnswerSTT' => null,
 	'CallStatusWebhookUrl' => null,
-	'CallStatusWebhookHeaders' => null,
+	'CallStatusWebhookHeader' => null,
 	'GoToDestination' => null, // If setted, go to this destination instead of process next POST
 	'NextMessageWebhookUrl' => null,
 	'NextMessageWebhookHeader' => null,
@@ -71,17 +72,41 @@ foreach ($input_parameters as $var => $default_value) {
 	}
 }
 
-/* get channel language */
-$tmp = $agi->get_variable('CHANNEL(language)');
-$channel_language = ($tmp['result'] == 1) ? $tmp['data'] : 'en';
+$call_data = array(
+	'UniqueID' => null,
+	'LinkedID' => null,
+	'CallerIDNum' => null,
+	'CallerIDName' => null,
+	'ConnectedLineIDNum' => null,
+	'ConnectedLineIDName' => null,
+	);
 
-switch ($channel_language) {
-	case 'en':
-		$languageCode = 'en_US';
-		break;
-	default:
-		$languageCode = $channel_language.'_'.strtoupper($channel_language);
-		break;
+foreach ($call_data as $var => $value) {
+	$r = $agi->get_variable("CHANNEL($var)");
+	if ($r['result'] == 1) {
+		$call_data[$var] = $r['data'];
+		$agi->verbose("$var => ".$r['data']);
+	}
+}
+
+/* get channel language */
+if (!empty($input_parameters['Language'])) {
+	$languageCode = $input_parameters['Language'];
+	$channel_language = substr($languageCode,0,2);
+	/*Set channel language*/
+	$agi->set_variable('CHANNEL(language)',$channel_language);
+} else {
+	$tmp = $agi->get_variable('CHANNEL(language)');
+	$channel_language = ($tmp['result'] == 1) ? $tmp['data'] : 'en';
+
+	switch ($channel_language) {
+		case 'en':
+			$languageCode = 'en_US';
+			break;
+		default:
+			$languageCode = $channel_language.'_'.strtoupper($channel_language);
+			break;
+	}
 }
 
 processRequest($input_parameters);
@@ -90,14 +115,14 @@ function processRequest($input_parameters) {
 	global $agi;
 	global $languageCode;
 	global $channel_language;
+	global $call_data;
 	$sampleRateHertz = 48000;
 	$bits = 16;
 
 	$agi->verbose('Processing request: '.print_r($input_parameters,1));
 
-	$result['ContactId'] = $input_parameters['ContactId'];
-	$result['CampaignId'] = $input_parameters['CampaignId'];
-	$result['MessageId'] = $input_parameters['MessageId'];
+	$call_data['ContactId'] = $input_parameters['ContactId'];
+	$call_data['CampaignId'] = $input_parameters['CampaignId'];
 
 	// Play audio file or TTS
 	if (!empty($input_parameters['MessageUrl'])) {
@@ -143,22 +168,26 @@ function processRequest($input_parameters) {
 
 	if ($input_parameters['UserInputMethod'] === 'digits') {
 		$agi->verbose('Getting user input from DTMF');
-		while (count($result['PressedDigits']) < $input_parameters['NuberOfExpectedDigits'] ) {
-			if (isset($input_parameters['EndDigit']) && substr($result['PressedDigits'],-1) === $input_parameters['EndDigit']) break;
+		while (count($result['PressedDigits']) < $input_parameters['NuberOfExpectedDigits'] || empty($input_parameters['NuberOfExpectedDigits'])) {
+			if (isset($input_parameters['EndDigit']) && !empty($result['PressedDigits']) && substr($result['PressedDigits'],-1) === $input_parameters['EndDigit']) {
+				/* Remove end digit and exit from loop */
+				$result['PressedDigits'] = substr($result['PressedDigits'],0,-1);
+				break;
+			}
 			$digit = $agi->wait_for_digit("6000");
 			if ($digit['code'] != AGIRES_OK || $digit['result'] <= 0 ) {
 				// TODO handle ERROR
 				$agi->verbose("DTMF error");
 			} 
-			$result['PressedDigits'] .= chr($pin['result']);
+			$result['PressedDigits'] .= chr($digit['result']);
 		}
 	} elseif ($input_parameters['UserInputMethod'] === 'voice') {
 		$agi->verbose('Getting user input from voice');
 		$fp = fopen('php://fd/3','rb');
 		$pack_string = ($bits == 16) ? 's*' : 'c*';
-		$silence_length = 0.5;
+		$silence_length = (!empty($input_parameters['EndOfSpeakSilenceLength'])) ? $input_parameters['EndOfSpeakSilenceLength'] : 0.5;
 		$speak_started = false;
-		$silence_threshold = 700;
+		$silence_threshold = 400;
 		$buffer_length = $sampleRateHertz*($bits/8)*$silence_length;
 		$outbuf = '';
 		$agi->verbose("Reading data from audio stream $buffer_length bytes at time");
@@ -180,11 +209,8 @@ function processRequest($input_parameters) {
 				$speak_started = true;
 			} elseif ($avg < $silence_threshold && $speak_started) {
 				// Silence detected
-				$agi->verbose('Silence detected');
+				$agi->verbose('Silence of '.$silence_length.' seconds detected');
 				break;
-			} else {
-				// Speak still under threshold level, drop buffer
-				$outbuf = '';
 			}
 		}
 		fclose($fp);
@@ -238,13 +264,13 @@ function processRequest($input_parameters) {
 					foreach ($resp->getAlternatives() as $alternative) {
 						$transcript = $alternative->getTranscript();
 						$confidence = $alternative->getConfidence();
-						$answers[] = array('transcript' = $transcript, 'confidence' => $confidence)
+						$answers[] = array('transcript' => $transcript, 'confidence' => $confidence);
 						$agi->verbose("Transcript:  $transcript");
 						$agi->verbose("Confidence:  $confidence");
 					}
 				}
 				$result['UserAnswerText'] = (isset($answers[0]['transcript']))?$answers[0]['transcript'] : '';
-				$result['UserAnswerAlternatives'] = $answers;
+				$result['UserAnswerAlternatives'] = json_encode($answers);
 				$client->close();
 			} else {
 				$agi->verbose($operation->getError());
@@ -255,14 +281,14 @@ function processRequest($input_parameters) {
 		unlink($audiofile_flac);
 	}
 
-	if (!isset($result['Success'])) {
-		$result['Success'] = true;
-	}
+	$result = array_merge($call_data, $result);
 	$ch = curl_init();
 	$headers = ['Content-Type: application/json;charset=utf-8','Accept: application/json;charset=utf-8'];
 	if (empty($input_parameters['NextMessageWebhookUrl'])) {
 		curl_setopt($ch, CURLOPT_URL, $input_parameters['CallStatusWebhookUrl']);
-		$headers[] = $input_parameters['CallStatusWebhookHeaders'];
+		$headers[] = $input_parameters['CallStatusWebhookHeader'];
+		if (!isset($result['Success'])){
+		$result['Success'] = true;}
 	} else {
 		curl_setopt($ch, CURLOPT_URL, $input_parameters['NextMessageWebhookUrl']);
 		$headers[] = $input_parameters['NextMessageWebhookHeader'];
@@ -289,8 +315,6 @@ function processRequest($input_parameters) {
 		$agi->goto_dest($dest[0],$dest[1],$dest[2]);
 	}
 }
-
-
 
 
 
