@@ -52,7 +52,7 @@ The user answer can be saved as an mp3 file and retrived, or converted to text a
 After the message to the user has been given and the user gave back his feedback, a webook is called. The webook should return additional information to progress with the interaction or send the call to another dialplan destination.
 
 ## Installation
-install required package lame `yum install -y lame`
+install required package lame and bcmath for php `yum install -y lame rh-php56-php-bcmath`
 If you whant to use TTS and STT, you need to have it enabled on your google account and save credentials in /home/asterisk/google-auth.json
 
 ## Start call
