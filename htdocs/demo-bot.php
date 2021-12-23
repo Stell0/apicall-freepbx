@@ -1,11 +1,14 @@
 <?php
 
 require_once '../vendor/autoload.php';
+require_once '../SlimTokenAuth.php';
 
 use \Psr\Http\Message\ServerRequestInterface as Request;
 use \Psr\Http\Message\ResponseInterface as Response;
 
 $app = new \Slim\App;
+
+$app->add(new SlimTokenAuth());
 
 $app->post('/aibot', function(Request $request, Response $response, array $args) use ($app) {
 	$post_data = $request->getParsedBody();
