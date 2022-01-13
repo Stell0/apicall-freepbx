@@ -100,6 +100,7 @@ class Apicall extends \FreePBX_Helpers implements \BMO
 		$ext->add($contextname, 's','',new \ext_set('EAGI_AUDIO_FORMAT','slin48'));
 		$ext->add($contextname, 's','',new \ext_answer(''));
 		$ext->add($contextname, 's','',new \extension('EAGI(aibot.eagi)'));
+		$ext->add($contextname, 'h','',new \ext_agi('aibot-hangup.agi'));
 	}
 }
 

@@ -1,0 +1,102 @@
+#!/usr/bin/env php
+<?php
+
+#
+#	Copyright (C) 2022 Nethesis S.r.l.
+#	http://www.nethesis.it - support@nethesis.it
+#
+#	This file is part of ReturnOnTransfer FreePBX module.
+#
+#	ReturnOnTransfer module is free software: you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation, either version 3 of the License, or any
+#	later version.
+#
+#	ReturnOnTransfer module is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with ReturnOnTransfer module.  If not, see <http://www.gnu.org/licenses/>.
+#
+$restrict_mods = true; //dont load any functions.inc.phps
+include "/etc/freepbx.conf";
+require_once "phpagi.php";
+
+//Include Speech To Text Google libraries
+global $amp_conf;
+require_once $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/vendor/autoload.php';
+
+$db = FreePBX::create()->Database;
+$agi = new AGI();
+
+// Get input variables from Asterisk variables
+$input_parameters = array(
+	'ContactId' => null,
+	'CampaignId' => null,
+	'PhoneNumber' => null,
+	'Language' => null,
+	'MessageUrl' => null,
+	'MessageText' => null,
+	'UserInputMethod' => false, // false | 'voice' | 'digits'
+	'EndOfSpeakSilenceLength' => null,
+	'MessageExitDigit' => '', // ''|123456789*# stop playing message and exit if one of digits is pressed
+	'NuberOfExpectedDigits' => 0,
+	'EndDigit' => null,
+	'UserAnswerSTT' => null,
+	'CallStatusWebhookUrl' => null,
+	'CallStatusWebhookHeader' => null,
+	'GoToDestination' => null, // If setted, go to this destination instead of process next POST
+	'NextMessageWebhookUrl' => null,
+	'NextMessageWebhookHeader' => null,
+);
+
+foreach ($input_parameters as $var => $default_value) {
+	$r = $agi->get_variable($var);
+	if ($r['result'] == 1) {
+		$input_parameters[$var] = base64_decode($r['data']);
+	}
+}
+
+$call_data = array(
+	'UniqueID' => null,
+	'LinkedID' => null,
+	'CallerIDNum' => null,
+	'CallerIDName' => null,
+	'ConnectedLineIDNum' => null,
+	'ConnectedLineIDName' => null,
+	'AnswerTimestamp' => null,
+        'ContactId' => null,
+        'CampaignId' => null,
+	);
+
+foreach ($call_data as $var => $value) {
+	$r = $agi->get_variable("CHANNEL($var)");
+	if ($r['result'] == 1) {
+		$call_data[$var] = $r['data'];
+		$agi->verbose("$var => ".$r['data']);
+	}
+}
+
+$call_data['duration'] = time() - $call_data['UniqueID'];
+$call_data['billsec'] = (!empty($call_data['AnswerTimestamp'])) ? round(time() - $call_data['AnswerTimestamp']) : 0; 
+
+$ch = curl_init();
+$headers = ['Content-Type: application/json;charset=utf-8','Accept: application/json;charset=utf-8'];
+curl_setopt($ch, CURLOPT_URL, $input_parameters['CallStatusWebhookUrl']);
+$headers[] = $input_parameters['CallStatusWebhookHeader'];
+curl_setopt($ch, CURLOPT_HTTPHEADER, implode("\n",$headers));
+curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+curl_setopt($ch, CURLOPT_POSTFIELDS, $call_data);
+curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+curl_setopt($ch, CURLOPT_HEADER, FALSE);
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+$post_results = json_decode($response, TRUE);
+$agi->verbose("result sent: ".json_encode($result));
+$agi->verbose("response code: $httpCode");
+$agi->verbose("response $response");
+
