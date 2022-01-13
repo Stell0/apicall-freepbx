@@ -90,7 +90,7 @@ foreach ($call_data as $var => $value) {
 }
 
 $call_data['AnswerTimestamp'] = time();
-$agi->set_variable('CHANNEL(AnswerTimestamp)',time());
+$agi->set_variable('AnswerTimestamp',time());
 
 /* get channel language */
 if (!empty($input_parameters['Language'])) {
@@ -123,16 +123,16 @@ function processRequest($input_parameters) {
 	$bits = 16;
 
 	// Overwrite CallStatusWebhookUrl and CallStatusWebhookHeader to make sure they are up to date
-        $agi->set_variable('CHANNEL(CallStatusWebhookUrl)',base64_encode($input_parameters['CallStatusWebhookUrl']));
-        $agi->set_variable('CHANNEL(CallStatusWebhookHeader)',base64_encode($input_parameters['CallStatusWebhookHeader']));
+        $agi->set_variable('CallStatusWebhookUrl',base64_encode($input_parameters['CallStatusWebhookUrl']));
+        $agi->set_variable('CallStatusWebhookHeader',base64_encode($input_parameters['CallStatusWebhookHeader']));
 
 	$agi->verbose('Processing request: '.print_r($input_parameters,1));
 
 	$call_data['ContactId'] = $input_parameters['ContactId'];
 	$call_data['CampaignId'] = $input_parameters['CampaignId'];
 
-	$agi->set_variable('CHANNEL(ContactId)',$input_parameters['ContactId']);
-	$agi->set_variable('CHANNEL(CampaignId)',$input_parameters['CampaignId']);
+	$agi->set_variable('ContactId',$input_parameters['ContactId']);
+	$agi->set_variable('CampaignId',$input_parameters['CampaignId']);
 
 	// Play audio file or TTS
 	if (!empty($input_parameters['MessageUrl'])) {
@@ -319,6 +319,7 @@ function processRequest($input_parameters) {
 	if (!empty($input_parameters['NextMessageWebhookUrl'])) {
 		processRequest($post_results);
 	} else {
+		$agi->set_variable('CHANNEL(hangup_handler_push)','aibot,h,1(args)');
 		$dest = !empty($input_parameters['GoToDestination']) ? $input_parameters['GoToDestination'] : 'macro-hangupcall,s,1';
 		$agi->verbose("Go to destination $dest");
 		$dest = explode(',',$dest);
