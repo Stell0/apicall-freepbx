@@ -10,7 +10,7 @@ Install googletts and apicall modules on FreePBX >= 14. Google tts require a val
 - to install apicall, just download release .tar.gz file in /usr/src/nethvoice/modules/apicall.tar.gz and launch nethserver-nethvoice14-update event:
 ```
 wget https://github.com/Stell0/apicall-freepbx/archive/refs/heads/main.tar.gz -O /usr/src/nethvoice/modules/apicall.tar.gz
-signal-event nethserver-nethvoice-14-update
+signal-event nethserver-nethvoice14-update
 ```
 
 ### On vanilla FreePBX
