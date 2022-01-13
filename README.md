@@ -56,7 +56,7 @@ install required package lame and bcmath for php `yum install -y lame rh-php56-p
 If you whant to use TTS and STT, you need to have it enabled on your google account and save credentials in /home/asterisk/google-auth.json
 
 ## Start call
-POST https://${HOST}/freepbx/apicall/aibot.php
+POST https://${HOST}/FREEPBX_WEB_ROOT/freepbx/apicall/aibot.php
 
 Authentication header: static token taken from  https://${HOST}/freepbx/admin/config.php?display=apicall
 
@@ -128,6 +128,10 @@ UserAnswerAlternatives: if UserInputMethod is "voice", it contains all possible 
 ## Example:
 With this curl, extension 201 is called and the text in MessageText is played using TTS. The user reply is then sent to https://${HOST}/apicall/demo-bot.php/aibot where the demo Slim application answers and interact with the user.
 
-`curl -kv "https://$(hostname)/freepbx/apicall/aibot.php" -H 'token: f18cd60d1838ae65bf9df31bff79ed46' -H 'Content-Type: application/json;charset=utf-8' --data '{"PhoneNumber": "201","Language":"it_IT","UserInputMethod":"voice","GoToDestination":"Hanghup,s,1","MessageText":"Questo è un test echo, quello che dici verrà compreso e ripetuto. Alcune parole sono comandi speciali. Pronuncia. lista. Per avere la lista dei comandi disponibili.","UserAnswerSTT":"1","NextMessageWebhookUrl":"https://'$(hostname)'/apicall/demo-bot.php/aibot","NextMessageWebhookHeader":"token: f18cd60d1838ae65bf9df31bff79ed46"}'`
+```
+TOKEN=$(mysql -B -N asterisk -e 'SELECT `val` FROM kvstore_FreePBX_modules_Apicall WHERE `key` = "token"')
+```
+
+`curl -kv "https://$(hostname)/freepbx/apicall/aibot.php" -H "token: $TOKEN" -H 'Content-Type: application/json;charset=utf-8' --data '{"PhoneNumber": "201","Language":"it_IT","UserInputMethod":"voice","GoToDestination":"Hangup,s,1","MessageText":"Questo è un test echo, quello che dici verrà compreso e ripetuto. Alcune parole sono comandi speciali. Pronuncia. lista. Per avere la lista dei comandi disponibili.","UserAnswerSTT":"1","NextMessageWebhookUrl":"https://'$(hostname)'/freepbx/apicall/demo-bot.php/aibot","NextMessageWebhookHeader":"token: '$TOKEN'"}'`
 
 *Note: this is still in development and should not be used in production*
