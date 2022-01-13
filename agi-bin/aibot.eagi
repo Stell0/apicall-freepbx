@@ -292,38 +292,36 @@ function processRequest($input_parameters) {
 	}
 
 	$result = array_merge($call_data, $result);
-	$ch = curl_init();
-	$headers = ['Content-Type: application/json;charset=utf-8','Accept: application/json;charset=utf-8'];
+
 	if (empty($input_parameters['NextMessageWebhookUrl'])) {
-		curl_setopt($ch, CURLOPT_URL, $input_parameters['CallStatusWebhookUrl']);
-		$headers[] = $input_parameters['CallStatusWebhookHeader'];
-		if (!isset($result['Success'])){
-		$result['Success'] = true;}
-	} else {
-		curl_setopt($ch, CURLOPT_URL, $input_parameters['NextMessageWebhookUrl']);
-		$headers[] = $input_parameters['NextMessageWebhookHeader'];
-	}
-	curl_setopt($ch, CURLOPT_HTTPHEADER, implode("\n",$headers));
-	curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
-	curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
-	curl_setopt($ch, CURLOPT_POSTFIELDS, $result);
-	curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-	curl_setopt($ch, CURLOPT_HEADER, FALSE);
-	$response = curl_exec($ch);
-	$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-	curl_close($ch);
-	$post_results = json_decode($response, TRUE);
-	$agi->verbose("result sent: ".json_encode($result));
-	$agi->verbose("response code: $httpCode");
-	$agi->verbose("response $response");
-	if (!empty($input_parameters['NextMessageWebhookUrl'])) {
-		processRequest($post_results);
-	} else {
+		// No more hook, go to final destination
+		// Set hangup handler that call the CallStatusWebhookUrl
 		$agi->set_variable('CHANNEL(hangup_handler_push)','aibot,h,1(args)');
 		$dest = !empty($input_parameters['GoToDestination']) ? $input_parameters['GoToDestination'] : 'macro-hangupcall,s,1';
 		$agi->verbose("Go to destination $dest");
 		$dest = explode(',',$dest);
 		$agi->goto_dest($dest[0],$dest[1],$dest[2]);
+	} else {
+		$ch = curl_init();
+		$headers = ['Content-Type' => 'application/json;charset=utf-8','Accept' => 'application/json;charset=utf-8'];
+		if (!empty($input_parameters['NextMessageWebhookHeader'])) {
+			$headers[] = $input_parameters['NextMessageWebhookHeader'];
+		}
+		curl_setopt($ch, CURLOPT_URL, $input_parameters['NextMessageWebhookUrl']);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, $result);
+		curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+		curl_setopt($ch, CURLOPT_HEADER, FALSE);
+		$response = curl_exec($ch);
+		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+		$post_results = json_decode($response, TRUE);
+		$agi->verbose("result sent: ".json_encode($result));
+		$agi->verbose("response code: $httpCode");
+		$agi->verbose("response $response");
+		processRequest($post_results);
 	}
 }
 
