@@ -224,11 +224,11 @@ function processRequest($input_parameters) {
 			}
 		}
 		fclose($fp);
-		$audiofile_id = uniqid("aibot_audiostream");
+		$audiofile_id = uniqid("aibot_audiostream_".$call_data['UniqueID']);
 		$audiofile_raw = '/tmp/'.$audiofile_id.'.raw'; // this is the file the audio is saved to
 		$audiofile_wav = '/tmp/'.$audiofile_id.'.wav';
 		$audiofile_flac = '/tmp/'.$audiofile_id.'.flac';
-		$audiofile_mp3 = '/var/www/html/audio/'.$audiofile_id.'.mp3';
+		$audiofile_mp3 = '/var/www/html/freepbx/admin/modules/apicall/htdocs/tmp_audio/'.$audiofile_id.'.mp3';
 		$fwp = fopen($audiofile_raw,'wb');
 		fwrite($fwp,$outbuf);
 		$agi->verbose("Audio stream written to $audiofile_raw");
@@ -239,7 +239,7 @@ function processRequest($input_parameters) {
 		$raw2flac_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_flac";
 		$wav2mp3_cmp = "lame -h $audiofile_wav $audiofile_mp3";
 		exec("$raw2wav_cmd && $raw2flac_cmd && $wav2mp3_cmp");
-		$result['UserAnswerMp3Url'] = gethostname().'/audio/'.$audiofile_id.'.mp3';
+		$result['UserAnswerMp3Url'] = gethostname().'/'.$amp_conf['AMPWEBROOT'].'/aibot/tmp_audio/'.$audiofile_id.'.mp3';
 
 		if ($input_parameters['UserAnswerSTT']) {
 			/*Use Google Speech To Text*/
@@ -286,9 +286,6 @@ function processRequest($input_parameters) {
 				$agi->verbose($operation->getError());
 			}
 		}
-		unlink($audiofile_raw);
-		unlink($audiofile_wav);
-		unlink($audiofile_flac);
 	}
 
 	$result = array_merge($call_data, $result);

@@ -84,9 +84,13 @@ foreach ( ['AnswerTimestamp','ContactId','CampaignId'] as $var) {
 		$agi->verbose("$var => ".$r['data']);
 	}
 }
-
 $call_data['duration'] = time() - $call_data['UniqueID'];
 $call_data['billsec'] = (!empty($call_data['AnswerTimestamp'])) ? round(time() - $call_data['AnswerTimestamp']) : 0; 
+
+// Delete audio files
+$audiofile_id_prefix = "aibot_audiostream_".$call_data['UniqueID'];
+array_map('unlink', glob("/tmp/$audiofile_id_prefix*"));
+array_map('unlink', glob("/var/www/html/freepbx/admin/modules/apicall/htdocs/tmp_audio/$audiofile_id_prefix*"));
 
 $ch = curl_init();
 $headers = ['Content-Type' => 'application/json;charset=utf-8','Accept' => 'application/json;charset=utf-8'];
