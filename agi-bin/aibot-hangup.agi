@@ -84,8 +84,10 @@ foreach ($call_data as $var => $value) {
 	$agi->verbose("$var => ".$call_data[$var]);
 }
 
-$call_data['duration'] = time() - $call_data['UniqueID'];
-$call_data['billsec'] = (!empty($call_data['AnswerTimestamp'])) ? round(time() - $call_data['AnswerTimestamp']) : 0; 
+$call_data['Duration'] = time() - $call_data['UniqueID'];
+$call_data['Billsec'] = (!empty($call_data['AnswerTimestamp'])) ? round(time() - $call_data['AnswerTimestamp']) : 0;
+$call_data['Answer'] = (!empty($call_data['AnswerTimestamp'])) ? True : False;
+$call_data['CallDetailUrl'] = gethostname().'/'.$amp_conf['AMPWEBROOT'].'/aibot/call-details.php/cdr/'.$call_data['UniqueID'];
 
 // Delete audio files
 $audiofile_id_prefix = "aibot_audiostream_".$call_data['UniqueID'];
