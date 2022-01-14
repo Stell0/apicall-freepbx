@@ -77,13 +77,14 @@ foreach ($call_data as $var => $value) {
 }
 
 // Get other data not in channel
-foreach ( ['AnswerTimestamp','ContactId','CampaignId'] as $var) {
+foreach ( ['AnswerTimestamp'] as $var) {
 	$r = $agi->get_variable("$var");
 	if ($r['result'] == 1) {
 		$call_data[$var] = $r['data'];
-		$agi->verbose("$var => ".$r['data']);
+		$agi->verbose("$var => ".$call_data[$var]);
 	}
 }
+
 $call_data['duration'] = time() - $call_data['UniqueID'];
 $call_data['billsec'] = (!empty($call_data['AnswerTimestamp'])) ? round(time() - $call_data['AnswerTimestamp']) : 0; 
 
@@ -106,7 +107,7 @@ $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 $post_results = json_decode($response, TRUE);
-$agi->verbose("result sent: ".json_encode($result));
+$agi->verbose("result sent: ".json_encode($call_data));
 $agi->verbose("response code: $httpCode");
 $agi->verbose("response $response");
 

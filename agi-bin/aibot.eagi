@@ -292,8 +292,6 @@ function processRequest($input_parameters) {
 
 	if (empty($input_parameters['NextMessageWebhookUrl'])) {
 		// No more hook, go to final destination
-		// Set hangup handler that call the CallStatusWebhookUrl
-		$agi->set_variable('CHANNEL(hangup_handler_push)','aibot,h,1(args)');
 		$dest = !empty($input_parameters['GoToDestination']) ? $input_parameters['GoToDestination'] : 'macro-hangupcall,s,1';
 		$agi->verbose("Go to destination $dest");
 		$dest = explode(',',$dest);

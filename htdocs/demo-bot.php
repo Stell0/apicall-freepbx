@@ -91,4 +91,11 @@ $app->post('/code', function(Request $request, Response $response, array $args) 
 	return $response->withJson($result,200);
 });
 
+$app->post('/status', function(Request $request, Response $response, array $args) use ($app) {
+	$post_data = $request->getParsedBody();
+	error_log('Called /status api');
+	error_log(print_r($post_data,1));
+	return $response->withStatus(200);
+});
+
 $app->run();

@@ -79,10 +79,10 @@ Extension: s
 
 foreach ( $input_parameters as $p => $default_value) {
 	$value = isset($post[$p]) ? $post[$p] : $default_value;
-	// TODO escape $value
-
 	$content .= "Setvar: $p=".base64_encode($value)."\n";
 }
+// Set hangup handler to send call result
+$content .= "Setvar: CHANNEL(hangup_handler_push)=aibot,h,1(args)\n";
 
 $tmp_name = tempnam("/tmp", 'aibot_call');
 $f = fopen($tmp_name,"w");
