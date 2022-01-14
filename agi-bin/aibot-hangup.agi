@@ -66,23 +66,22 @@ $call_data = array(
 	'CallerIDName' => null,
 	'ConnectedLineIDNum' => null,
 	'ConnectedLineIDName' => null,
+	'AnswerTimestamp' => null,
 	);
 
 foreach ($call_data as $var => $value) {
-	$r = $agi->get_variable("CHANNEL($var)");
+	$r = $agi->get_variable($var);
 	if ($r['result'] == 1) {
-		$call_data[$var] = $r['data'];
-		$agi->verbose("$var => ".$r['data']);
+		$call_data[$var] = base64_decode($r['data']);
 	}
-}
-
-// Get other data not in channel
-foreach ( ['AnswerTimestamp'] as $var) {
-	$r = $agi->get_variable("$var");
-	if ($r['result'] == 1) {
-		$call_data[$var] = $r['data'];
-		$agi->verbose("$var => ".$call_data[$var]);
+	// get data from channel if it call isn't answered
+	if (empty($call_data[$var])) {
+		$r = $agi->get_variable("CHANNEL($var)");
+		if ($r['result'] == 1) {
+			$call_data[$var] = $r['data'];
+		}
 	}
+	$agi->verbose("$var => ".$call_data[$var]);
 }
 
 $call_data['duration'] = time() - $call_data['UniqueID'];
