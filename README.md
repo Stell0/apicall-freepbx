@@ -97,7 +97,7 @@ NextMessageWebhookHeader: optional - header to add to the NextMessageWebhookUrl 
 
 
 
-Response is JSON and is sent to NextMessageWebhookUrl if it is setted, CallStatusWebhookUrl otherwise. It has:
+Response is JSON and is sent to NextMessageWebhookUrl if it is setted. It has:
 
 ContactId: same ContactId given in POST
 
@@ -123,6 +123,31 @@ UserAnswerText: if UserInputMethod is "voice", it contains (more likely guess of
 
 UserAnswerAlternatives: if UserInputMethod is "voice", it contains all possible guess text of user response with probability
 
+
+At the end of the call, a POST is made to CallStatusWebhookUrl. This happens even if the call isn't answered at all or dialplan destination has been dynamically changed using GoToDestination.
+Response is in JSON format and is sent to CallStatusWebhookUrl adding CallStatusWebhookHeader as header if it has been setted
+
+UniqueID: call Asterisk uniqueid. An unique id that is assigned to the call and can be used to search for call log in CDR
+
+LinkedID: uniqueid of linked channel. Useful to identify transfered calls
+
+CallerIDNum: number of caller
+
+CallerIDName: resolved name of caller
+
+ConnectedLineIDNum: number of called
+
+ConnectedLineIDName: resolved name of called
+
+AnswerTimestamp: timestamp when call was answered
+
+Duration: time from when call is started to hangup
+
+Billsec: time from answer to hungup
+
+Answer: true|false true if call has been answered
+
+CallDetailUrl: URL to the CDR API that return all CDR call details
 
 
 ## Example:
