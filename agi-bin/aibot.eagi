@@ -234,9 +234,9 @@ function processRequest($input_parameters) {
 		// convert audio file to mp3, place it in an accessible folder and return the URL
 		$raw2wav_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_wav";
 		$raw2flac_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_flac";
-		$wav2mp3_cmp = "lame -h $audiofile_wav $audiofile_mp3";
-		exec("$raw2wav_cmd && $raw2flac_cmd && $wav2mp3_cmp");
-		$result['UserAnswerMp3Url'] = gethostname().'/'.$amp_conf['AMPWEBROOT'].'/aibot/tmp_audio/'.$audiofile_id.'.mp3';
+		$wav2mp3_cmd = "lame -h $audiofile_wav $audiofile_mp3";
+		exec("$raw2wav_cmd && $raw2flac_cmd && $wav2mp3_cmd");
+		$result['UserAnswerMp3Url'] = gethostname().'/freepbx/apicall/tmp_audio/'.$audiofile_id.'.mp3';
 
 		if ($input_parameters['UserAnswerSTT']) {
 			/*Use Google Speech To Text*/
