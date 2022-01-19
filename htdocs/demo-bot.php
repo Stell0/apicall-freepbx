@@ -20,42 +20,45 @@ $app->post('/aibot', function(Request $request, Response $response, array $args)
 		if (strtolower($text) == "esci") {
 			$result = array(
 				"Language"=>"it_IT",
-				"GoToDestination"=>"Hanghup,s,1",
+				"GoToDestination"=>"app-blackhole,hangup,1",
 				"MessageText"=>"Test terminato. Ciao ciao.",
 			);
 		} elseif (strtolower($text) == "lista") {
 			$result = array(
 				"Language"=>"it_IT",
-                        	"UserInputMethod"=>"voice",
-	                        "UserAnswerSTT"=>1,
-        	                "MessageText"=>"I comandi disponibili sono: esci, per terminare il test. Attesa, per mettere questa chiamata in attesa per sempre. Codice, per sperimentare l'inserimento di un codice numerico tramite la tastiera. Codice vocale, per sperimentare l'inserimento di un codice tramite il riconoscimento vocale. Lista, per avere la lista dei comandi possibili",
-                	        "NextMessageWebhookUrl"=>"https://makako.nethesis.it/aibot/aibot",
-	                );
+				"UserInputMethod"=>"voice",
+				"UserAnswerSTT"=>1,
+				"MessageText"=>"I comandi disponibili sono: esci, per terminare il test. Attesa, per mettere questa chiamata in attesa per sempre. Codice, per sperimentare l'inserimento di un codice numerico tramite la tastiera. Codice vocale, per sperimentare l'inserimento di un codice tramite il riconoscimento vocale. Lista, per avere la lista dei comandi possibili",
+				"NextMessageWebhookUrl"=> 'https://' . gethostname() . '/freepbx/apicall/demo-bot.php/aibot',
+				"NextMessageWebhookHeader" => "token: ".SlimTokenAuth::getToken(),
+			);
 		} elseif (strtolower($text) == "attesa") {
 			$result = array(
 				"Language"=>"it_IT",
 				"GoToDestination"=>"app-blackhole,musiconhold,1",
 				"MessageText"=>"La chiamata verrà messa in attesa per sempre. Addio.",
-        	        );
+			);
 		} elseif (strtolower($text) == "codice") {
 			$result = array(
 				"Language"=>"it_IT",
-                        	"UserInputMethod"=>"digits",
+				"UserInputMethod"=>"digits",
 				"MessageText"=>"Inserisci un codice seguito dal tasto cancelletto",
 				"MessageExitDigit" => "0123456789",
 				"EndDigit" => "#",
-				"NextMessageWebhookUrl"=>"https://makako.nethesis.it/aibot/code"
-        	        );
+				"NextMessageWebhookUrl"=> 'https://' . gethostname() . '/freepbx/apicall/demo-bot.php/code',
+				"NextMessageWebhookHeader" => "token: ".SlimTokenAuth::getToken(),
+			);
 		} elseif (strtolower($text) == "codice vocale") {
-                        $result = array(
-                                "Language"=>"it_IT",
-                                "UserInputMethod"=>"voice",
-                                "EndOfSpeakSilenceLength"=>1.5,
+			$result = array(
+				"Language"=>"it_IT",
+				"UserInputMethod"=>"voice",
+				"EndOfSpeakSilenceLength"=>1.5,
 				"UserAnswerSTT"=>1,
-                                "MessageText"=>"Pronuncia il codice",
-                                "NextMessageWebhookUrl"=>"https://makako.nethesis.it/aibot/code"
-                        );      
-                }
+				"MessageText"=>"Pronuncia il codice",
+				"NextMessageWebhookUrl"=> 'https://' . gethostname() . '/freepbx/apicall/demo-bot.php/code',
+				"NextMessageWebhookHeader" => "token: ".SlimTokenAuth::getToken(),
+			);
+		}
 	}
 	if (empty($result)) {
 		$result = array(
@@ -63,7 +66,8 @@ $app->post('/aibot', function(Request $request, Response $response, array $args)
 			"UserInputMethod"=>"voice",
 			"UserAnswerSTT"=>1,
 			"MessageText"=>$user_text,
-			"NextMessageWebhookUrl"=>"https://makako.nethesis.it/aibot/aibot",
+			"NextMessageWebhookUrl"=> 'https://' . gethostname() . '/freepbx/apicall/demo-bot.php/aibot',
+			"NextMessageWebhookHeader" => "token: ".SlimTokenAuth::getToken(),
 		);
 	}
 	error_log(json_encode($result));
@@ -82,11 +86,12 @@ $app->post('/code', function(Request $request, Response $response, array $args) 
 	}
 	$result = array(
 			"Language"=>"it_IT",
-                        "UserInputMethod"=>"voice",
-                        "UserAnswerSTT"=>1,
-                        "MessageText"=>$answer,
-                        "NextMessageWebhookUrl"=>"https://makako.nethesis.it/aibot/aibot",
-                );
+			"UserInputMethod"=>"voice",
+			"UserAnswerSTT"=>1,
+			"MessageText"=>$answer,
+			"NextMessageWebhookUrl"=> 'https://' . gethostname() . '/freepbx/apicall/demo-bot.php/aibot',
+			"NextMessageWebhookHeader" => "token: ".SlimTokenAuth::getToken(),
+		);
 	error_log(json_encode($result));
 	return $response->withJson($result,200);
 });
