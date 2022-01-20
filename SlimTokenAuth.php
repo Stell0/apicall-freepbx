@@ -28,11 +28,7 @@ class SlimTokenAuth
      * @throws \RuntimeException
      */
     public function __construct() {
-	include_once '/etc/freepbx_db.conf';
-	$sql = 'SELECT `val` FROM `kvstore_FreePBX_modules_Apicall` WHERE `key` = "token"';
-	$sth = $db->prepare($sql);
-	$sth->execute();
-	$this->token = $sth->fetchAll()[0][0];
+	$this->token = $this->getToken();
 	if (empty($this->token)) throw new \RuntimeException('Apicall autentication token not configured', 1640251616);
     }
 
@@ -63,6 +59,14 @@ class SlimTokenAuth
             $response = $response->withHeader('Content-Language', 'en');
         }
         return $response;
+    }
+
+    public function getToken(){
+	include '/etc/freepbx_db.conf';
+	$sql = 'SELECT `val` FROM `kvstore_FreePBX_modules_Apicall` WHERE `key` = "token"';
+	$sth = $db->prepare($sql);
+	$sth->execute();
+	return $sth->fetchAll()[0][0];
     }
 }
 
