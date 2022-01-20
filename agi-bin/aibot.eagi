@@ -219,7 +219,8 @@ while (!feof($fp)) {
 		$last_speech_key = end(array_keys($speech_bytes));
 		if (isSpeaking($avg,$volume_levels) === true && (empty($speech_bytes) || $speech_bytes[$last_speech_key]["sent"] === true )) {
 			$agi->verbose("[start speaking] average level of $avg");
-			$speech_bytes[] = ["start" => $byte_read, "sent" => false];
+			$start = ( $byte_read >= $buffer_length ) ? $byte_read - $buffer_length: 0;
+			$speech_bytes[] = ["start" => $start, "sent" => false];
 			$last_speech_key = end(array_keys($speech_bytes));
 		} elseif (isSpeaking($avg,$volume_levels) === false && !empty($speech_bytes) && $speech_bytes[$last_speech_key]["sent"] !== true) {
 			// Silence detected
@@ -298,16 +299,9 @@ while (!feof($fp)) {
                                 $result['UserAnswerText'] = (isset($answers[0]['transcript']))?$answers[0]['transcript'] : '';
                                 $result['UserAnswerAlternatives'] = json_encode($answers);
                                 $client->close();
-				if (empty($result['UserAnswerText']) && $void_loop_counter < 2 ) {
-					// phrase not recognized, try listen user speak for another loop
-					$agi->verbose("phrase not recognized, try listen user speak for another loop");
-					$void_loop_counter ++;
-					unset($speech_bytes[$last_speech_key]["end"]);
-				} else {
-					$agi->verbose("recognized: ".$result['UserAnswerText']);
-					$void_loop_counter = 0;
-					$speech_bytes[$last_speech_key]["sent"] = true;
-				}
+				$agi->verbose("recognized: ".$result['UserAnswerText']);
+				$void_loop_counter = 0;
+				$speech_bytes[$last_speech_key]["sent"] = true;
                         } else {
                                 $agi->verbose($operation->getError());
                         }
@@ -361,9 +355,9 @@ while (!feof($fp)) {
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                 curl_close($ch);
                 $post_results = json_decode($response, TRUE);
-                $agi->verbose("result sent: ".json_encode($result));
+                $agi->verbose("result sent to ".$input_parameters['NextMessageWebhookUrl']." : ".json_encode($result));
                 $agi->verbose("response code: $httpCode");
-                $agi->verbose("response $response");
+                $agi->verbose("response ".json_encode($post_results));
 
 		// Do another loop using post response as input data
 		$input_parameters = $post_results;
