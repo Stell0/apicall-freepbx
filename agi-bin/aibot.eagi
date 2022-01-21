@@ -30,6 +30,7 @@ $agi = new AGI();
 require_once $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/vendor/autoload.php';
 // Include Speech to Text libraies
 use Google\Cloud\Speech\V1\SpeechClient;
+use Google\Cloud\Speech\V1\SpeechContext;
 use Google\Cloud\Speech\V1\RecognitionAudio;
 use Google\Cloud\Speech\V1\RecognitionConfig;
 use Google\Cloud\Speech\V1\RecognitionConfig\AudioEncoding;
@@ -98,7 +99,6 @@ $bits = 16;
 $fp = fopen('php://fd/3','rb');
 $pack_string = ($bits == 16) ? 's*' : 'c*';
 $outbuf = '';
-$speech_bytes = array(); // this array contains touple of start-stop bytes
 $byte_read = 0;
 $volume_levels = [];
 
@@ -198,39 +198,33 @@ while (!feof($fp)) {
                         $result['PressedDigits'] .= chr($digit['result']);
                 }
 	} elseif ($input_parameters['UserInputMethod'] === 'voice') {
+		/* Voice recognition */
 		$silence_length = (!empty($input_parameters['EndOfSpeakSilenceLength'])) ? $input_parameters['EndOfSpeakSilenceLength'] : 0.5;
-		$agi->verbose("$silence_length");
-		$buffer_length = $sampleRateHertz*($bits/8)*$silence_length;
+		$buffer_length = $sampleRateHertz*($bits/8) * 1/10; // Capture 1/10 seconds at time.
 		$buffer = '';
 		while (strlen($buffer) <= $buffer_length || feof($fp)) {
 			$buffer .= fread($fp, $buffer_length);
 		}
-		$agi->verbose('Readed '.strlen($buffer).' from audio stream');
+		//$agi->verbose('Readed '.strlen($buffer).' from audio stream');
 		$outbuf .= $buffer; // binary stream is treated like string
+		$byte_read += $buffer_length;
 		$decoded = unpack($pack_string,$buffer);
 		$sum = 0;
 		foreach ($decoded as $var) {
 			$sum += abs($var);
 		}
-		$avg = $sum/$buffer_length;
-		$agi->verbose("Buffer average level = ".round($avg));
-		$volume_levels[] = $avg;
+		$volume_levels[] = $sum/$buffer_length;
+		if (count($volume_levels) > ($silence_length*10)) array_shift($volume_levels); // Keep array volume histry length under silence_length * 10
+		//$agi->verbose("Buffer average level = ".round(end($volume_levels)));
 
-		$last_speech_key = end(array_keys($speech_bytes));
-		if (isSpeaking($avg,$volume_levels) === true && (empty($speech_bytes) || $speech_bytes[$last_speech_key]["sent"] === true )) {
-			$agi->verbose("[start speaking] average level of $avg");
-			$start = ( $byte_read >= $buffer_length ) ? $byte_read - $buffer_length: 0;
-			$speech_bytes[] = ["start" => $start, "sent" => false];
-			$last_speech_key = end(array_keys($speech_bytes));
-		} elseif (isSpeaking($avg,$volume_levels) === false && !empty($speech_bytes) && $speech_bytes[$last_speech_key]["sent"] !== true) {
-			// Silence detected
-			$agi->verbose("[stop speaking] Silence of $silence_length seconds, level $avg detected");
-			$speech_bytes[$last_speech_key]["end"] = $byte_read+$buffer_length;
+		if (isSpeaking($volume_levels,$silence_length) === true && !isset($speech_start)) {
+			$speech_start = ( $byte_read > (2*$buffer_length*$silence_length*10) ) ? $byte_read - (2*$buffer_length*$silence_length*10) : 0;
+		} elseif (isSpeaking($volume_levels,$silence_length) === false && isset($speech_start)) {
+			$speech_stop = $byte_read;
 		}
-		$byte_read += $buffer_length;
 		
 		/* Loop again if last phrase isn't completed*/
-		if (empty($speech_bytes) || $speech_bytes[$last_speech_key]["sent"] === true || empty($speech_bytes[$last_speech_key]["end"])) {
+		if (!isset($speech_stop) || !isset($speech_start)) {
 			continue;
 		}
 
@@ -241,8 +235,14 @@ while (!feof($fp)) {
 		// create file pointer
 		$audiofile_raw_pointer = fopen($audiofile_raw,"w");
 		// Write bytes from start to end into $audiofile_raw
-		$wres = fwrite($audiofile_raw_pointer,(substr($outbuf,$speech_bytes[$last_speech_key]["start"],$speech_bytes[$last_speech_key]["end"]-$speech_bytes[$last_speech_key]["start"])));
+		$wres = fwrite($audiofile_raw_pointer,(substr($outbuf,$speech_start)));
 		fclose($audiofile_raw_pointer);
+		unset($speech_start);
+		unset($speech_stop);
+		$byte_read = 0;
+		$outbuf = '';
+		$volume_levels = [];
+
 		if ($wres === false) {
 			$agi->verbose("ERROR writing audio stream chunk to temporary raw file");
 			//TODO handle ERROR
@@ -255,10 +255,26 @@ while (!feof($fp)) {
 			$audiofile_flac = '/tmp/'.$audiofile_id.'.flac';
 			$raw2flac_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_flac";
 			exec($raw2flac_cmd);
+			//unlink($audiofile_raw);
 			
 			// Give flac file to Google TTS
 			$encoding = AudioEncoding::FLAC;
+
 			$content = file_get_contents($audiofile_flac);
+			unlink($audiofile_flac);
+
+			$audiofile_wav = '/tmp/'.$audiofile_id.'.wav';
+			$audiofile_mp3 = $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/htdocs/tmp_audio/'.$audiofile_id.'.mp3';
+			$result['UserAnswerMp3Url'] = 'https://'.gethostname().'/freepbx/apicall/tmp_audio/'.$audiofile_id.'.mp3';
+			$raw2wav_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_wav";
+			$wav2mp3_cmd = "lame -h $audiofile_wav $audiofile_mp3";
+			exec("$raw2wav_cmd && $wav2mp3_cmd");
+			unlink($audiofile_raw);
+			unlink($audiofile_wav);
+
+			// Give Mp3 file to Google TTS
+			//$encoding = AudioEncoding::MP3;
+			//$content = file_get_contents($audiofile_mp3);
 
                         // set string as audio content
                         $audio = (new RecognitionAudio())
@@ -266,8 +282,13 @@ while (!feof($fp)) {
                         // set config
                         $config = (new RecognitionConfig())
                                 ->setEncoding($encoding)
-                                ->setSampleRateHertz($sampleRateHertz)
-                                ->setLanguageCode($result['Language']);
+	                        ->setSampleRateHertz($sampleRateHertz)
+				->setLanguageCode($result['Language']);
+
+			if (!empty($input_parameters['SpeechContext'])) {
+				$speechContext = new SpeechContext(['phrases' => $input_parameters['SpeechContext']]);
+				$config->setSpeechContexts(array($speechContext));
+			}
 
                         // create the speech client
 			if (!file_exists('/home/asterisk/google-auth.json')) {
@@ -301,12 +322,9 @@ while (!feof($fp)) {
                                 $client->close();
 				$agi->verbose("recognized: ".$result['UserAnswerText']);
 				$void_loop_counter = 0;
-				$speech_bytes[$last_speech_key]["sent"] = true;
                         } else {
                                 $agi->verbose($operation->getError());
                         }
-			unlink($audiofile_raw);
-			unlink($audiofile_flac);
 		} else {
 			// Don't use STT, convert chunk to MP3 and send back url
 			$audiofile_wav = '/tmp/'.$audiofile_id.'.wav';
@@ -316,7 +334,6 @@ while (!feof($fp)) {
 			exec("$raw2wav_cmd && $wav2mp3_cmd");
 			unlink($audiofile_raw);
 			unlink($audiofile_wav);
-			$speech_bytes[$last_speech_key]["sent"] = true;
 			$result['UserAnswerMp3Url'] = 'https://'.gethostname().'/freepbx/apicall/tmp_audio/'.$audiofile_id.'.mp3';
 			$agi->verbose("MP3 audio chunk file written to $audiofile_mp3");
 		}
@@ -365,19 +382,19 @@ while (!feof($fp)) {
 }
 fclose($fp);
 
-function isSpeaking($level, $past_levels = []) {
+function isSpeaking($past_levels,$silence_length=0.5) {
 	global $agi;
-	if (count($past_levels)<3) {
-		$agi->verbose("level: $level, thresholds: [100,200]");
-		//Too few past levels, use hardcoded levels.
-		if ($level < 100) return false;
-		elseif ($level > 200) return true;
-		else return null;
+	// use last (10*silence_length) average as last captured
+	$c = count($past_levels);
+	if (count($past_levels)<$silence_length*10) {
+		return false;
 	} else {
-		$mean = array_sum($past_levels)/count($past_levels);
-		$agi->verbose("level: $level, thresholds: [".round($mean-($mean/3)).",".round($mean+($mean/3))."]");
-		if ($level < $mean-($mean/3)) return false;
-		elseif ($level > $mean+($mean/3)) return true;
-		else return null;
+		$result = null;
+		for ($i = 0; $i < $silence_length*10; $i++) {
+			if ($past_levels[$c-$i-1] < 100 && $result !== true) $result = false;
+			elseif ($past_levels[$c-$i-1] > 100 && $result !== false) $result = true;
+			else break;
+		}
+		return $result;
 	}
 }

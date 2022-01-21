@@ -85,6 +85,8 @@ EndDigit: optional - end process and call webook after this digit has been press
 
 UserAnswerSTT: optional - if true, convert user answer to text using Google Speech to Text
 
+SpeechContext: optional - a list of strings containing words and phrases "hints" so that the speech recognition is more likely to recognize them. This can be used to improve the accuracy for specific words and phrases, for example, if specific commands are typically spoken by the user. This can also be used to add additional words to the vocabulary of the recognizer.
+
 CallStatusWebhookUrl: send status response to this url
 
 CallStatusWebhookHeader: add this header to call status webhook
