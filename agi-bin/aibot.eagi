@@ -56,6 +56,7 @@ $input_parameters = array(
 	'NuberOfExpectedDigits' => 0,
 	'EndDigit' => null,
 	'UserAnswerSTT' => null,
+	'SpeechContext' => null,
 	'CallStatusWebhookUrl' => null,
 	'CallStatusWebhookHeader' => null,
 	'GoToDestination' => null, // If setted, go to this destination instead of process next POST
@@ -93,21 +94,20 @@ foreach ($call_data as $var => $value) {
 	$agi->set_variable($var,base64_encode($value));
 }
 
-// Audio stream reading loop
+// Audio stream variables
 $sampleRateHertz = 48000;
 $bits = 16;
-$fp = fopen('php://fd/3','rb');
 $pack_string = ($bits == 16) ? 's*' : 'c*';
 $outbuf = '';
 $byte_read = 0;
 $volume_levels = [];
 
+// Audio stream reading loop
+$fp = fopen('php://fd/3','rb');
 while (!feof($fp)) {
 	$agi->verbose('Processing request: '.json_encode($input_parameters));
 
-	// Cleanup variables
 	$result = [];
-	$void_loop_counter = 0;
 
 	/* get/set channel language */
 	if (!empty($input_parameters['Language'])) {
@@ -228,63 +228,53 @@ while (!feof($fp)) {
 			continue;
 		}
 
+		/* Write audio data ti file and convert it in various formats*/
 		$audiofile_id = uniqid("aibot_audiostream_".$call_data['UniqueID']);
 		$audiofile_raw = '/tmp/'.$audiofile_id.'.raw';
-
-		/* Write last chunk of bytes into $audiofile_raw for further processing */
-		// create file pointer
+		$audiofile_wav = '/tmp/'.$audiofile_id.'.wav';
+		$audiofile_mp3 = $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/htdocs/tmp_audio/'.$audiofile_id.'.mp3';
 		$audiofile_raw_pointer = fopen($audiofile_raw,"w");
-		// Write bytes from start to end into $audiofile_raw
 		$wres = fwrite($audiofile_raw_pointer,(substr($outbuf,$speech_start)));
+		if ($wres === false) {
+			$agi->verbose("ERROR writing audio stream chunk to temporary raw file");
+			exit(1);
+		}	
 		fclose($audiofile_raw_pointer);
+
+		// Convert file also to mp3
+		$raw2wav_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_wav";
+		$wav2mp3_cmd = "lame -h $audiofile_wav $audiofile_mp3";
+		exec("($raw2wav_cmd && $wav2mp3_cmd) >/dev/null &");
+		$result['UserAnswerMp3Url'] = 'https://'.gethostname().'/freepbx/apicall/tmp_audio/'.$audiofile_id.'.mp3';
+
+		// Clean up variables for the next loop
 		unset($speech_start);
 		unset($speech_stop);
 		$byte_read = 0;
 		$outbuf = '';
 		$volume_levels = [];
 
-		if ($wres === false) {
-			$agi->verbose("ERROR writing audio stream chunk to temporary raw file");
-			//TODO handle ERROR
-		}	
-
 		/*Use Google Speech To Text to process last audio chunk*/
 		if ($input_parameters['UserAnswerSTT']) {
 			// Proccess last audio chunk using Google TTS
-			// Copy audio buffer into a flac file
+			// use FLAC format for a better recognition as suggested by Google
 			$audiofile_flac = '/tmp/'.$audiofile_id.'.flac';
 			$raw2flac_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_flac";
 			exec($raw2flac_cmd);
-			//unlink($audiofile_raw);
-			
-			// Give flac file to Google TTS
+
 			$encoding = AudioEncoding::FLAC;
-
-			$content = file_get_contents($audiofile_flac);
-			unlink($audiofile_flac);
-
-			$audiofile_wav = '/tmp/'.$audiofile_id.'.wav';
-			$audiofile_mp3 = $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/htdocs/tmp_audio/'.$audiofile_id.'.mp3';
-			$result['UserAnswerMp3Url'] = 'https://'.gethostname().'/freepbx/apicall/tmp_audio/'.$audiofile_id.'.mp3';
-			$raw2wav_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_wav";
-			$wav2mp3_cmd = "lame -h $audiofile_wav $audiofile_mp3";
-			exec("$raw2wav_cmd && $wav2mp3_cmd");
-			unlink($audiofile_raw);
-			unlink($audiofile_wav);
-
-			// Give Mp3 file to Google TTS
-			//$encoding = AudioEncoding::MP3;
-			//$content = file_get_contents($audiofile_mp3);
 
                         // set string as audio content
                         $audio = (new RecognitionAudio())
-                                ->setContent($content);
+                                ->setContent(file_get_contents($audiofile_flac));
+
                         // set config
                         $config = (new RecognitionConfig())
                                 ->setEncoding($encoding)
 	                        ->setSampleRateHertz($sampleRateHertz)
 				->setLanguageCode($result['Language']);
 
+			// Use speech context for better recognition if available
 			if (!empty($input_parameters['SpeechContext'])) {
 				$speechContext = new SpeechContext(['phrases' => $input_parameters['SpeechContext']]);
 				$config->setSpeechContexts(array($speechContext));
@@ -293,8 +283,8 @@ while (!feof($fp)) {
                         // create the speech client
 			if (!file_exists('/home/asterisk/google-auth.json')) {
 				$agi->verbose("ERROR: missing google authentication file");
-	                        //TODO handle ERROR
 			}
+
                         $client = new SpeechClient(['credentials' => '/home/asterisk/google-auth.json']);
 
                         // create the asyncronous recognize operation
@@ -303,9 +293,6 @@ while (!feof($fp)) {
 
                         if ($operation->operationSucceeded()) {
                                 $response = $operation->getResult();
-
-                                // each result is for a consecutive portion of the audio. iterate
-                                // through them to get the transcripts for the entire audio file.
                                 $answers = array();
                                 foreach ($response->getResults() as $resp) {
                                         $alternatives = $resp->getAlternatives();
@@ -313,84 +300,69 @@ while (!feof($fp)) {
                                                 $transcript = $alternative->getTranscript();
                                                 $confidence = $alternative->getConfidence();
                                                 $answers[] = array('transcript' => $transcript, 'confidence' => $confidence);
-                                                $agi->verbose("Transcript:  $transcript");
-                                                $agi->verbose("Confidence:  $confidence");
                                         }
                                 }
                                 $result['UserAnswerText'] = (isset($answers[0]['transcript']))?$answers[0]['transcript'] : '';
                                 $result['UserAnswerAlternatives'] = json_encode($answers);
                                 $client->close();
 				$agi->verbose("recognized: ".$result['UserAnswerText']);
-				$void_loop_counter = 0;
-                        } else {
-                                $agi->verbose($operation->getError());
                         }
-		} else {
-			// Don't use STT, convert chunk to MP3 and send back url
-			$audiofile_wav = '/tmp/'.$audiofile_id.'.wav';
-			$audiofile_mp3 = $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/htdocs/tmp_audio/'.$audiofile_id.'.mp3';
-			$raw2wav_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_wav";
-			$wav2mp3_cmd = "lame -h $audiofile_wav $audiofile_mp3";
-			exec("$raw2wav_cmd && $wav2mp3_cmd");
-			unlink($audiofile_raw);
-			unlink($audiofile_wav);
-			$result['UserAnswerMp3Url'] = 'https://'.gethostname().'/freepbx/apicall/tmp_audio/'.$audiofile_id.'.mp3';
-			$agi->verbose("MP3 audio chunk file written to $audiofile_mp3");
 		}
 	}
 
 	if (empty($input_parameters['NextMessageWebhookUrl'])) {
-		// No more hook, go to final destination
+		// No more hooks, go to final destination
 		fclose($fp);
 		$dest = !empty($input_parameters['GoToDestination']) ? $input_parameters['GoToDestination'] : 'app-blackhole,hangup,1';
 		$agi->verbose("Going to destination $dest");
 		$dest = explode(',',$dest);
 		$agi->goto_dest($dest[0],$dest[1],$dest[2]);
 		exit(0);
-	} else {
-		/* Webhook is configured, send response to it */
-
-		// compile response data
-		$result['UserInputMethod'] = $input_parameters['UserInputMethod'];
-		$result['UniqueID'] = $call_data['UniqueID'];
-		$result['LinkedID'] = $call_data['LinkedID'];
-		$result['AnswerTimestamp'] =  $call_data['AnswerTimestamp'];
-
-		$ch = curl_init();
-                $headers = ['Content-Type' => 'application/json;charset=utf-8','Accept' => 'application/json;charset=utf-8'];
-                if (!empty($input_parameters['NextMessageWebhookHeader'])) {
-                        $headers[] = $input_parameters['NextMessageWebhookHeader'];
-                }
-                curl_setopt($ch, CURLOPT_URL, $input_parameters['NextMessageWebhookUrl']);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-                curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, $result);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
-                curl_setopt($ch, CURLOPT_HEADER, FALSE);
-                $response = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                $post_results = json_decode($response, TRUE);
-                $agi->verbose("result sent to ".$input_parameters['NextMessageWebhookUrl']." : ".json_encode($result));
-                $agi->verbose("response code: $httpCode");
-                $agi->verbose("response ".json_encode($post_results));
-
-		// Do another loop using post response as input data
-		$input_parameters = $post_results;
 	}
+
+	/* Send response to webook */
+
+	// compile response data
+	$result['UserInputMethod'] = $input_parameters['UserInputMethod'];
+	$result['UniqueID'] = $call_data['UniqueID'];
+	$result['LinkedID'] = $call_data['LinkedID'];
+	$result['AnswerTimestamp'] =  $call_data['AnswerTimestamp'];
+
+	$ch = curl_init();
+	$headers = ['Content-Type' => 'application/json;charset=utf-8','Accept' => 'application/json;charset=utf-8'];
+	if (!empty($input_parameters['NextMessageWebhookHeader'])) {
+		$headers[] = $input_parameters['NextMessageWebhookHeader'];
+	}
+	curl_setopt($ch, CURLOPT_URL, $input_parameters['NextMessageWebhookUrl']);
+	curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+	curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+	curl_setopt($ch, CURLOPT_POSTFIELDS, $result);
+	curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+	curl_setopt($ch, CURLOPT_HEADER, FALSE);
+	$response = curl_exec($ch);
+	$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+	curl_close($ch);
+	$post_results = json_decode($response, TRUE);
+	$agi->verbose("result sent to ".$input_parameters['NextMessageWebhookUrl']." : ".json_encode($result));
+	$agi->verbose("response code: $httpCode");
+	$agi->verbose("response ".json_encode($post_results));
+
+	// Set post results as input_parameters for the next loop
+	$input_parameters = $post_results;
 }
 fclose($fp);
 
+/*Try to understand if user is speaking or not by verifying volume of last chunks of audio recorded */
 function isSpeaking($past_levels,$silence_length=0.5) {
-	global $agi;
 	// use last (10*silence_length) average as last captured
 	$c = count($past_levels);
-	if (count($past_levels)<$silence_length*10) {
+	$data_to_check = $silence_length*10;
+	if (count($past_levels)<$data_to_check) {
 		return false;
 	} else {
 		$result = null;
-		for ($i = 0; $i < $silence_length*10; $i++) {
+		for ($i = 0; $i < $data_to_check; $i++) {
 			if ($past_levels[$c-$i-1] < 100 && $result !== true) $result = false;
 			elseif ($past_levels[$c-$i-1] > 100 && $result !== false) $result = true;
 			else break;
