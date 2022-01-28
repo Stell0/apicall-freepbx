@@ -63,8 +63,9 @@ $input_parameters = array(
         'CallStatusWebhookUrl' => null,
         'CallStatusWebhookHeader' => '',
         'GoToDestination' => null, // If setted, go to this destination instead of process next POST
-        'NextMessageWebhookUrl' => null,
-        'NextMessageWebhookHeader' => '',
+	'NextMessageWebhookUrl' => null,
+	'NextMessageWebhookHeader' => '',
+	'Timeout' => null,
 );
 
 $content = "Channel: Local/{$tocall}@from-internal

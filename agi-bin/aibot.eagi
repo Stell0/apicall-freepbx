@@ -62,6 +62,7 @@ $input_parameters = array(
 	'GoToDestination' => null, // If setted, go to this destination instead of process next POST
 	'NextMessageWebhookUrl' => null,
 	'NextMessageWebhookHeader' => null,
+	'Timeout' => null,
 );
 
 foreach ($input_parameters as $var => $default_value) {
@@ -101,6 +102,7 @@ $pack_string = ($bits == 16) ? 's*' : 'c*';
 $outbuf = '';
 $byte_read = 0;
 $volume_levels = [];
+$start_time = time();
 
 // Audio stream reading loop
 $fp = fopen('php://fd/3','rb');
@@ -127,6 +129,9 @@ while (!feof($fp)) {
 				break;
 		}
 	}
+
+	// Set timeout
+	$timeout = (!empty($input_parameters['Timeout'])) ? $input_parameters['Timeout'] : 30;
 
 	foreach (['ContactId','CampaignId','CallStatusWebhookUrl','CallStatusWebhookHeader'] as $var) {
 		if (!empty($input_parameters[$var])) {
@@ -190,7 +195,7 @@ while (!feof($fp)) {
                                 $result['PressedDigits'] = substr($result['PressedDigits'],0,-1);
                                 break;
                         }
-                        $digit = $agi->wait_for_digit("6000");
+                        $digit = $agi->wait_for_digit($timeout*1000);
                         if ($digit['code'] != AGIRES_OK || $digit['result'] <= 0 ) {
                                 // TODO handle ERROR
                                 $agi->verbose("DTMF ERROR");
@@ -224,7 +229,7 @@ while (!feof($fp)) {
 		}
 		
 		/* Loop again if last phrase isn't completed*/
-		if (!isset($speech_stop) || !isset($speech_start)) {
+		if ((time()-$start_time) < $timeout && (!isset($speech_stop) || !isset($speech_start))) {
 			continue;
 		}
 
@@ -350,6 +355,8 @@ while (!feof($fp)) {
 
 	// Set post results as input_parameters for the next loop
 	$input_parameters = $post_results;
+	//update timeout
+	$start_time = time();
 }
 fclose($fp);
 

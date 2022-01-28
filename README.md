@@ -97,6 +97,7 @@ NextMessageWebhookUrl: the webhook where results are posted. The result of weboo
 
 NextMessageWebhookHeader: optional - header to add to the NextMessageWebhookUrl POST
 
+Timeout: optional - Number of seconds to wait for user response. Default is 30.
 
 
 Response is JSON and is sent to NextMessageWebhookUrl if it is setted. It has:
