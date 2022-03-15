@@ -1,0 +1,379 @@
+#!/usr/bin/env php
+<?php
+
+#
+#	Copyright (C) 2022 Nethesis S.r.l.
+#	http://www.nethesis.it - support@nethesis.it
+#
+#	This file is part of ReturnOnTransfer FreePBX module.
+#
+#	ReturnOnTransfer module is free software: you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation, either version 3 of the License, or any
+#	later version.
+#
+#	ReturnOnTransfer module is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with ReturnOnTransfer module.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+$restrict_mods = true; //dont load any functions.inc.phps
+include "/etc/freepbx.conf";
+require_once "phpagi.php";
+$agi = new AGI();
+
+//Include Speech To Text Google libraries
+require_once $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/vendor/autoload.php';
+// Include Speech to Text libraies
+use Google\Cloud\Speech\V1\SpeechClient;
+use Google\Cloud\Speech\V1\SpeechContext;
+use Google\Cloud\Speech\V1\RecognitionAudio;
+use Google\Cloud\Speech\V1\RecognitionConfig;
+use Google\Cloud\Speech\V1\RecognitionConfig\AudioEncoding;
+// Include Text to Speech libraries
+use Google\Cloud\TextToSpeech\V1\AudioConfig;
+use Google\Cloud\TextToSpeech\V1\AudioEncoding as TTSAudioEncoding;
+use Google\Cloud\TextToSpeech\V1\SsmlVoiceGender;
+use Google\Cloud\TextToSpeech\V1\SynthesisInput;
+use Google\Cloud\TextToSpeech\V1\TextToSpeechClient;
+use Google\Cloud\TextToSpeech\V1\VoiceSelectionParams;
+
+// Get input variables from Asterisk variables
+$input_parameters = array(
+	'ContactId' => null,
+	'CampaignId' => null,
+	'PhoneNumber' => null,
+	'Language' => null,
+	'MessageUrl' => null,
+	'MessageText' => null,
+	'UserInputMethod' => false, // false | 'voice' | 'digits'
+	'EndOfSpeakSilenceLength' => null,
+	'MessageExitDigit' => '', // ''|123456789*# stop playing message and exit if one of digits is pressed
+	'NuberOfExpectedDigits' => 0,
+	'EndDigit' => null,
+	'UserAnswerSTT' => null,
+	'SpeechContext' => null,
+	'CallStatusWebhookUrl' => null,
+	'CallStatusWebhookHeader' => null,
+	'GoToDestination' => null, // If setted, go to this destination instead of process next POST
+	'NextMessageWebhookUrl' => null,
+	'NextMessageWebhookHeader' => null,
+	'Timeout' => null,
+);
+
+foreach ($input_parameters as $var => $default_value) {
+	$r = $agi->get_variable($var);
+	if ($r['result'] == 1) {
+		$input_parameters[$var] = base64_decode($r['data']);
+	}
+}
+
+$call_data = array(
+	'UniqueID' => null,
+	'LinkedID' => null,
+	'CallerIDNum' => null,
+	'CallerIDName' => null,
+	'ConnectedLineIDNum' => null,
+	'ConnectedLineIDName' => null,
+	);
+
+foreach ($call_data as $var => $value) {
+	$r = $agi->get_variable("CHANNEL($var)");
+	if ($r['result'] == 1) {
+		$call_data[$var] = $r['data'];
+		$agi->verbose("$var => ".$r['data']);
+	}
+}
+$call_data['AnswerTimestamp'] = time();
+
+// store initial call_data into variables
+foreach ($call_data as $var => $value) {
+	$agi->set_variable($var,base64_encode($value));
+}
+
+// Audio stream variables
+$sampleRateHertz = 48000;
+$bits = 16;
+$pack_string = ($bits == 16) ? 's*' : 'c*';
+$outbuf = '';
+$byte_read = 0;
+$volume_levels = [];
+$start_time = time();
+
+// Audio stream reading loop
+$fp = fopen('php://fd/3','rb');
+while (!feof($fp)) {
+	$agi->verbose('Processing request: '.json_encode($input_parameters));
+
+	$result = [];
+
+	/* get/set channel language */
+	if (!empty($input_parameters['Language'])) {
+		$channel_language = substr($input_parameters['Language'],0,2);
+		/*Set channel language*/
+		$agi->set_variable('CHANNEL(language)',$channel_language);
+		$result['Language'] = $input_parameters['Language'];
+	} else {
+		$tmp = $agi->get_variable('CHANNEL(language)');
+		$channel_language = ($tmp['result'] == 1) ? $tmp['data'] : 'en';
+		switch ($channel_language) {
+			case 'en':
+				$result['Language'] = 'en_US';
+				break;
+			default:
+				$result['Language'] = $channel_language.'_'.strtoupper($channel_language);
+				break;
+		}
+	}
+
+	// Set timeout
+	$timeout = (!empty($input_parameters['Timeout'])) ? $input_parameters['Timeout'] : 30;
+
+	foreach (['ContactId','CampaignId','CallStatusWebhookUrl','CallStatusWebhookHeader'] as $var) {
+		if (!empty($input_parameters[$var])) {
+			$result[$var] = $input_parameters[$var];
+			$agi->set_variable($var,base64_encode($input_parameters[$var]));
+			unset($input_parameters[$var]);
+		}
+	}
+
+	/* Play audio message if needed */
+        if (!empty($input_parameters['MessageUrl'])) {
+                $message_file_name = "aibot_audiomessage".sha1($input_parameters['MessageUrl']);
+                $message_file = '/var/lib/asterisk/sounds/'.$channel_language.'/'.$message_file_name.'.mp3';
+                if (!file_exists($message_file)) {
+                        $agi->verbose('Retrieving audio message from '.$input_parameters['MessageUrl']);
+                        file_put_contents($message_file, fopen($input_parameters['MessageUrl'], 'r'));
+                } else {
+                        $agi->verbose("Message file $message_file already exists");
+                }
+		unset($input_parameters['MessageUrl']);
+        } elseif (!empty($input_parameters['MessageText'])) {
+                $message_file_name = "aibot_audiomessage".sha1($input_parameters['MessageText']);
+                $message_file = '/var/lib/asterisk/sounds/'.$channel_language.'/'.$message_file_name.'.mp3';
+                if (!file_exists($message_file)) {
+                        $agi->verbose('Generating audio message with TTS');
+                        $client = new TextToSpeechClient(['credentials' => '/home/asterisk/google-auth.json']);
+
+                        $input_text = (new SynthesisInput())
+                                ->setText($input_parameters['MessageText']);
+
+                        $voice = (new VoiceSelectionParams())
+                                ->setLanguageCode($result['Language'])
+                                ->setSsmlGender(SsmlVoiceGender::FEMALE);
+
+                        $audioConfig = (new AudioConfig())
+                                ->setAudioEncoding(TTSAudioEncoding::MP3);
+
+                        $response = $client->synthesizeSpeech($input_text, $voice, $audioConfig);
+                        $audioContent = $response->getAudioContent();
+                        file_put_contents($message_file, $audioContent);
+                        $client->close();
+                } else {
+                        $agi->verbose("Message file $message_file already exists");
+                }
+		unset($input_parameters['MessageText']);
+        }
+	if (!empty($message_file)) {
+                $res = $agi->stream_file($message_file_name,$input_parameters['MessageExitDigit']);
+                if($res['code'] == AGIRES_OK && $res['result'] > 0) {
+                        $result['PressedDigits'] = chr($res['result']);
+                }
+		unset($message_file);
+        }
+
+	if ($input_parameters['UserInputMethod'] === 'digits') {
+		//process user insert digits
+		$agi->verbose('Getting user input from DTMF');
+		while (count($result['PressedDigits']) < $input_parameters['NuberOfExpectedDigits'] || empty($input_parameters['NuberOfExpectedDigits'])) {
+                        if (isset($input_parameters['EndDigit']) && !empty($result['PressedDigits']) && substr($result['PressedDigits'],-1) === $input_parameters['EndDigit']) {
+                                /* Remove end digit and exit from loop */
+                                $result['PressedDigits'] = substr($result['PressedDigits'],0,-1);
+                                break;
+                        }
+                        $digit = $agi->wait_for_digit($timeout*1000);
+                        if ($digit['code'] != AGIRES_OK || $digit['result'] <= 0 ) {
+                                // TODO handle ERROR
+                                $agi->verbose("DTMF ERROR");
+                        }
+                        $result['PressedDigits'] .= chr($digit['result']);
+                }
+	} elseif ($input_parameters['UserInputMethod'] === 'voice') {
+		/* Voice recognition */
+		$silence_length = (!empty($input_parameters['EndOfSpeakSilenceLength'])) ? $input_parameters['EndOfSpeakSilenceLength'] : 0.5;
+		$buffer_length = $sampleRateHertz*($bits/8) * 1/10; // Capture 1/10 seconds at time.
+		$buffer = '';
+		while (strlen($buffer) <= $buffer_length || feof($fp)) {
+			$buffer .= fread($fp, $buffer_length);
+		}
+		//$agi->verbose('Readed '.strlen($buffer).' from audio stream');
+		$outbuf .= $buffer; // binary stream is treated like string
+		$byte_read += $buffer_length;
+		$decoded = unpack($pack_string,$buffer);
+		$sum = 0;
+		foreach ($decoded as $var) {
+			$sum += abs($var);
+		}
+		$volume_levels[] = $sum/$buffer_length;
+		if (count($volume_levels) > ($silence_length*10)) array_shift($volume_levels); // Keep array volume histry length under silence_length * 10
+		//$agi->verbose("Buffer average level = ".round(end($volume_levels)));
+
+		if (isSpeaking($volume_levels,$silence_length) === true && !isset($speech_start)) {
+			$speech_start = ( $byte_read > (2*$buffer_length*$silence_length*10) ) ? $byte_read - (2*$buffer_length*$silence_length*10) : 0;
+		} elseif (isSpeaking($volume_levels,$silence_length) === false && isset($speech_start)) {
+			$speech_stop = $byte_read;
+		}
+		
+		/* Loop again if last phrase isn't completed*/
+		if ((time()-$start_time) < $timeout && (!isset($speech_stop) || !isset($speech_start))) {
+			continue;
+		}
+
+		/* Write audio data ti file and convert it in various formats*/
+		$audiofile_id = uniqid("aibot_audiostream_".$call_data['UniqueID']);
+		$audiofile_raw = '/tmp/'.$audiofile_id.'.raw';
+		$audiofile_wav = '/tmp/'.$audiofile_id.'.wav';
+		$audiofile_mp3 = $amp_conf['AMPWEBROOT'].'/admin/modules/apicall/htdocs/tmp_audio/'.$audiofile_id.'.mp3';
+		$audiofile_raw_pointer = fopen($audiofile_raw,"w");
+		$wres = fwrite($audiofile_raw_pointer,(substr($outbuf,$speech_start)));
+		if ($wres === false) {
+			$agi->verbose("ERROR writing audio stream chunk to temporary raw file");
+			exit(1);
+		}	
+		fclose($audiofile_raw_pointer);
+
+		// Convert file also to mp3
+		$raw2wav_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_wav";
+		$wav2mp3_cmd = "lame -h $audiofile_wav $audiofile_mp3";
+		exec("($raw2wav_cmd && $wav2mp3_cmd) >/dev/null &");
+		$result['UserAnswerMp3Url'] = 'https://'.gethostname().'/freepbx/apicall/tmp_audio/'.$audiofile_id.'.mp3';
+
+		// Clean up variables for the next loop
+		unset($speech_start);
+		unset($speech_stop);
+		$byte_read = 0;
+		$outbuf = '';
+		$volume_levels = [];
+
+		/*Use Google Speech To Text to process last audio chunk*/
+		if ($input_parameters['UserAnswerSTT']) {
+			// Proccess last audio chunk using Google TTS
+			// use FLAC format for a better recognition as suggested by Google
+			$audiofile_flac = '/tmp/'.$audiofile_id.'.flac';
+			$raw2flac_cmd = "sox -r $sampleRateHertz -e signed -b $bits -c 1 $audiofile_raw $audiofile_flac";
+			exec($raw2flac_cmd);
+
+			$encoding = AudioEncoding::FLAC;
+
+                        // set string as audio content
+                        $audio = (new RecognitionAudio())
+                                ->setContent(file_get_contents($audiofile_flac));
+
+                        // set config
+                        $config = (new RecognitionConfig())
+                                ->setEncoding($encoding)
+	                        ->setSampleRateHertz($sampleRateHertz)
+				->setLanguageCode($result['Language']);
+
+			// Use speech context for better recognition if available
+			if (!empty($input_parameters['SpeechContext'])) {
+				$speechContext = new SpeechContext(['phrases' => $input_parameters['SpeechContext']]);
+				$config->setSpeechContexts(array($speechContext));
+			}
+
+                        // create the speech client
+			if (!file_exists('/home/asterisk/google-auth.json')) {
+				$agi->verbose("ERROR: missing google authentication file");
+			}
+
+                        $client = new SpeechClient(['credentials' => '/home/asterisk/google-auth.json']);
+
+                        // create the asyncronous recognize operation
+                        $operation = $client->longRunningRecognize($config, $audio);
+                        $operation->pollUntilComplete();
+
+                        if ($operation->operationSucceeded()) {
+                                $response = $operation->getResult();
+                                $answers = array();
+                                foreach ($response->getResults() as $resp) {
+                                        $alternatives = $resp->getAlternatives();
+                                        foreach ($resp->getAlternatives() as $alternative) {
+                                                $transcript = $alternative->getTranscript();
+                                                $confidence = $alternative->getConfidence();
+                                                $answers[] = array('transcript' => $transcript, 'confidence' => $confidence);
+                                        }
+                                }
+                                $result['UserAnswerText'] = (isset($answers[0]['transcript']))?$answers[0]['transcript'] : '';
+                                $result['UserAnswerAlternatives'] = json_encode($answers);
+                                $client->close();
+				$agi->verbose("recognized: ".$result['UserAnswerText']);
+                        }
+		}
+	}
+
+	if (empty($input_parameters['NextMessageWebhookUrl'])) {
+		// No more hooks, go to final destination
+		fclose($fp);
+		$dest = !empty($input_parameters['GoToDestination']) ? $input_parameters['GoToDestination'] : 'app-blackhole,hangup,1';
+		$agi->verbose("Going to destination $dest");
+		$dest = explode(',',$dest);
+		$agi->goto_dest($dest[0],$dest[1],$dest[2]);
+		exit(0);
+	}
+
+	/* Send response to webook */
+
+	// compile response data
+	$result['UserInputMethod'] = $input_parameters['UserInputMethod'];
+	$result['UniqueID'] = $call_data['UniqueID'];
+	$result['LinkedID'] = $call_data['LinkedID'];
+	$result['AnswerTimestamp'] =  $call_data['AnswerTimestamp'];
+
+	$ch = curl_init();
+	$headers = ['Content-Type' => 'application/json;charset=utf-8','Accept' => 'application/json;charset=utf-8'];
+	if (!empty($input_parameters['NextMessageWebhookHeader'])) {
+		$headers[] = $input_parameters['NextMessageWebhookHeader'];
+	}
+	curl_setopt($ch, CURLOPT_URL, $input_parameters['NextMessageWebhookUrl']);
+	curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+	curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
+	curl_setopt($ch, CURLOPT_POSTFIELDS, $result);
+	curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+	curl_setopt($ch, CURLOPT_HEADER, FALSE);
+	$response = curl_exec($ch);
+	$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+	curl_close($ch);
+	$post_results = json_decode($response, TRUE);
+	$agi->verbose("result sent to ".$input_parameters['NextMessageWebhookUrl']." : ".json_encode($result));
+	$agi->verbose("response code: $httpCode");
+	$agi->verbose("response ".json_encode($post_results));
+
+	// Set post results as input_parameters for the next loop
+	$input_parameters = $post_results;
+	//update timeout
+	$start_time = time();
+}
+fclose($fp);
+
+/*Try to understand if user is speaking or not by verifying volume of last chunks of audio recorded */
+function isSpeaking($past_levels,$silence_length=0.5) {
+	// use last (10*silence_length) average as last captured
+	$c = count($past_levels);
+	$data_to_check = $silence_length*10;
+	if (count($past_levels)<$data_to_check) {
+		return false;
+	} else {
+		$result = null;
+		for ($i = 0; $i < $data_to_check; $i++) {
+			if ($past_levels[$c-$i-1] < 100 && $result !== true) $result = false;
+			elseif ($past_levels[$c-$i-1] > 100 && $result !== false) $result = true;
+			else break;
+		}
+		return $result;
+	}
+}
